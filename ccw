@@ -15,6 +15,19 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 NC='\033[0m' # No Color
 
+# Config
+CONFIG_FILE="$HOME/.config/ccw/config"
+DANGEROUS_MODE=false
+
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        # shellcheck source=/dev/null
+        source "$CONFIG_FILE"
+    fi
+}
+
+load_config
+
 # Get repo root and name
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
     echo -e "${RED}Error: Not in a git repository${NC}"
@@ -56,7 +69,11 @@ cmd_create() {
 
     echo ""
     echo "Starting Claude Code..."
-    cd "$worktree_path" && claude --dangerously-skip-permissions
+    if [ "$DANGEROUS_MODE" = true ]; then
+        cd "$worktree_path" && claude --dangerously-skip-permissions
+    else
+        cd "$worktree_path" && claude
+    fi
 }
 
 cmd_list() {
@@ -141,6 +158,47 @@ cmd_cleanup() {
     echo -e "${GREEN}✓${NC} Removed $removed merged worktree(s)"
 }
 
+cmd_config() {
+    local key="$1"
+    local value="$2"
+
+    if [ -z "$key" ]; then
+        echo "Current config ($CONFIG_FILE):"
+        echo ""
+        if [ -f "$CONFIG_FILE" ]; then
+            cat "$CONFIG_FILE"
+        else
+            echo "  (no config file)"
+        fi
+        echo ""
+        echo "Available options:"
+        echo "  DANGEROUS_MODE=true    Launch Claude with --dangerously-skip-permissions"
+        return
+    fi
+
+    # Create config directory if needed
+    mkdir -p "$(dirname "$CONFIG_FILE")"
+
+    if [ -z "$value" ]; then
+        # Show current value
+        if [ -f "$CONFIG_FILE" ] && grep -q "^$key=" "$CONFIG_FILE"; then
+            grep "^$key=" "$CONFIG_FILE"
+        else
+            echo "$key is not set"
+        fi
+    else
+        # Set value
+        if [ -f "$CONFIG_FILE" ] && grep -q "^$key=" "$CONFIG_FILE"; then
+            # Update existing
+            sed -i '' "s/^$key=.*/$key=$value/" "$CONFIG_FILE"
+        else
+            # Append new
+            echo "$key=$value" >> "$CONFIG_FILE"
+        fi
+        echo -e "${GREEN}✓${NC} Set $key=$value"
+    fi
+}
+
 cmd_help() {
     echo "ccw - Claude Code Worktree manager"
     echo ""
@@ -149,9 +207,12 @@ cmd_help() {
     echo "  ccw list            List all worktrees for current repo"
     echo "  ccw remove <name>   Remove worktree (checks if merged first)"
     echo "  ccw cleanup         Remove all merged worktrees"
+    echo "  ccw config [key] [value]  View or set configuration"
     echo ""
     echo "Worktrees are created in: ~/worktrees/<repo-name>/<name>"
     echo "Branches are named: feature/<name>"
+    echo ""
+    echo "Config file: ~/.config/ccw/config"
 }
 
 # Main
@@ -160,6 +221,7 @@ case "${1:-}" in
     list)    cmd_list ;;
     remove)  cmd_remove "$2" ;;
     cleanup) cmd_cleanup ;;
+    config)  cmd_config "$2" "$3" ;;
     help|-h|--help) cmd_help ;;
     *)
         cmd_help
