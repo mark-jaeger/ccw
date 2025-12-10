@@ -13,7 +13,7 @@ if [ -d "$CCW_DIR" ]; then
     git -C "$CCW_DIR" pull --quiet
 else
     echo "Cloning ccw..."
-    git clone --quiet https://github.com/YOUR_USERNAME/ccw.git "$CCW_DIR"
+    git clone --quiet https://github.com/mark-jaeger/ccw.git "$CCW_DIR"
 fi
 
 # Make executable
