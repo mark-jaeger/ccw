@@ -1,0 +1,168 @@
+#!/bin/bash
+# ccw - Claude Code Worktree manager
+#
+# Usage:
+#   ccw create <name>   Create worktree and start Claude Code
+#   ccw list            List all worktrees for current repo
+#   ccw remove <name>   Remove worktree (checks if merged first)
+#   ccw cleanup         Remove all merged worktrees
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m' # No Color
+
+# Get repo root and name
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo -e "${RED}Error: Not in a git repository${NC}"
+    exit 1
+}
+REPO_NAME="$(basename "$REPO_ROOT")"
+WORKTREE_BASE="$HOME/worktrees/$REPO_NAME"
+
+cmd_create() {
+    local name="$1"
+    if [ -z "$name" ]; then
+        echo "Usage: ccw create <worktree-name>"
+        exit 1
+    fi
+
+    local worktree_path="$WORKTREE_BASE/$name"
+    local branch_name="feature/$name"
+
+    mkdir -p "$WORKTREE_BASE"
+
+    if [ -d "$worktree_path" ]; then
+        echo -e "${YELLOW}Worktree already exists${NC}"
+    else
+        echo -e "Creating worktree ${GREEN}$name${NC}..."
+        git worktree add "$worktree_path" -b "$branch_name"
+
+        # Copy .env if exists
+        [ -f "$REPO_ROOT/.env" ] && cp "$REPO_ROOT/.env" "$worktree_path/.env"
+
+        # Install dependencies if package.json exists
+        if [ -f "$worktree_path/package.json" ]; then
+            echo "Installing dependencies..."
+            (cd "$worktree_path" && npm install --silent)
+        fi
+
+        echo -e "${GREEN}✓${NC} Created: $worktree_path"
+        echo -e "${GREEN}✓${NC} Branch: $branch_name"
+    fi
+
+    echo ""
+    echo "Starting Claude Code..."
+    cd "$worktree_path" && claude --dangerously-skip-permissions
+}
+
+cmd_list() {
+    echo -e "${GREEN}Worktrees for $REPO_NAME:${NC}"
+    echo ""
+    git worktree list
+}
+
+cmd_remove() {
+    local name="$1"
+    if [ -z "$name" ]; then
+        echo "Usage: ccw remove <worktree-name>"
+        exit 1
+    fi
+
+    local worktree_path="$WORKTREE_BASE/$name"
+    local branch_name="feature/$name"
+
+    if [ ! -d "$worktree_path" ]; then
+        echo -e "${RED}Worktree not found:${NC} $worktree_path"
+        exit 1
+    fi
+
+    # Check if branch is merged into main or staging
+    local merged=""
+    if git branch --merged main 2>/dev/null | grep -q "$branch_name"; then
+        merged="main"
+    elif git branch --merged staging 2>/dev/null | grep -q "$branch_name"; then
+        merged="staging"
+    fi
+
+    if [ -n "$merged" ]; then
+        echo -e "${GREEN}✓${NC} Branch is merged into $merged"
+        git worktree remove "$worktree_path"
+        git branch -d "$branch_name" 2>/dev/null || true
+        echo -e "${GREEN}✓${NC} Removed worktree and branch"
+    else
+        echo -e "${YELLOW}⚠${NC} Branch is NOT merged"
+        echo ""
+        read -p "Remove anyway? (y/N) " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            git worktree remove --force "$worktree_path"
+            read -p "Also delete branch $branch_name? (y/N) " del_branch
+            if [[ "$del_branch" =~ ^[Yy]$ ]]; then
+                git branch -D "$branch_name"
+            fi
+            echo -e "${GREEN}✓${NC} Removed"
+        else
+            echo "Cancelled"
+        fi
+    fi
+}
+
+cmd_cleanup() {
+    echo -e "Cleaning up merged worktrees for ${GREEN}$REPO_NAME${NC}..."
+    echo ""
+
+    local removed=0
+
+    for worktree_path in "$WORKTREE_BASE"/*/; do
+        [ -d "$worktree_path" ] || continue
+
+        local name="$(basename "$worktree_path")"
+        local branch_name="feature/$name"
+
+        # Skip if not a valid worktree
+        git worktree list | grep -q "$worktree_path" || continue
+
+        # Check if merged
+        if git branch --merged main 2>/dev/null | grep -q "$branch_name" || \
+           git branch --merged staging 2>/dev/null | grep -q "$branch_name"; then
+            echo -e "Removing ${GREEN}$name${NC} (merged)"
+            git worktree remove "$worktree_path" 2>/dev/null || true
+            git branch -d "$branch_name" 2>/dev/null || true
+            ((removed++))
+        else
+            echo -e "Keeping ${YELLOW}$name${NC} (not merged)"
+        fi
+    done
+
+    echo ""
+    echo -e "${GREEN}✓${NC} Removed $removed merged worktree(s)"
+}
+
+cmd_help() {
+    echo "ccw - Claude Code Worktree manager"
+    echo ""
+    echo "Usage:"
+    echo "  ccw create <name>   Create worktree and start Claude Code"
+    echo "  ccw list            List all worktrees for current repo"
+    echo "  ccw remove <name>   Remove worktree (checks if merged first)"
+    echo "  ccw cleanup         Remove all merged worktrees"
+    echo ""
+    echo "Worktrees are created in: ~/worktrees/<repo-name>/<name>"
+    echo "Branches are named: feature/<name>"
+}
+
+# Main
+case "${1:-}" in
+    create)  cmd_create "$2" ;;
+    list)    cmd_list ;;
+    remove)  cmd_remove "$2" ;;
+    cleanup) cmd_cleanup ;;
+    help|-h|--help) cmd_help ;;
+    *)
+        cmd_help
+        exit 1
+        ;;
+esac
