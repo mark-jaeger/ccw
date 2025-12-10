@@ -3,6 +3,7 @@
 #
 # Usage:
 #   ccw create <name>   Create worktree and start Claude Code
+#   ccw open [name]     Open existing worktree (interactive if no name)
 #   ccw list            List all worktrees for current repo
 #   ccw remove <name>   Remove worktree (checks if merged first)
 #   ccw cleanup         Remove all merged worktrees
@@ -80,6 +81,109 @@ cmd_list() {
     echo -e "${GREEN}Worktrees for $REPO_NAME:${NC}"
     echo ""
     git worktree list
+}
+
+cmd_open() {
+    local name="$1"
+    local worktree_path
+
+    if [ -n "$name" ]; then
+        # Direct open by name
+        worktree_path="$WORKTREE_BASE/$name"
+        if [ ! -d "$worktree_path" ]; then
+            echo -e "${RED}Worktree not found:${NC} $worktree_path"
+            echo ""
+            echo "Available worktrees:"
+            for wt in "$WORKTREE_BASE"/*/; do
+                [ -d "$wt" ] && echo "  $(basename "$wt")"
+            done
+            exit 1
+        fi
+    else
+        # Interactive selection
+        local worktrees=()
+        local paths=()
+
+        # Get worktrees for this repo (skip the main repo itself)
+        while IFS= read -r line; do
+            local wt_path=$(echo "$line" | awk '{print $1}')
+            # Only include worktrees under our worktree base
+            if [[ "$wt_path" == "$WORKTREE_BASE"/* ]]; then
+                worktrees+=("$(basename "$wt_path")")
+                paths+=("$wt_path")
+            fi
+        done < <(git worktree list)
+
+        if [ ${#worktrees[@]} -eq 0 ]; then
+            echo -e "${YELLOW}No worktrees found for $REPO_NAME${NC}"
+            echo "Create one with: ccw create <name>"
+            exit 1
+        fi
+
+        local selected=0
+        local total=${#worktrees[@]}
+
+        # Hide cursor
+        tput civis
+        trap 'tput cnorm' EXIT
+
+        while true; do
+            # Move cursor to top and redraw
+            tput cup 0 0
+            tput ed
+            echo -e "${GREEN}Select worktree to open:${NC}"
+            echo ""
+
+            for i in "${!worktrees[@]}"; do
+                if [ $i -eq $selected ]; then
+                    echo -e "  ${GREEN}▸ ${worktrees[$i]}${NC}"
+                else
+                    echo "    ${worktrees[$i]}"
+                fi
+            done
+
+            echo ""
+            echo -e "${YELLOW}↑/↓${NC} navigate  ${YELLOW}Enter${NC} select  ${YELLOW}q${NC} quit"
+
+            # Read single keypress
+            read -rsn1 key
+
+            case "$key" in
+                $'\x1b') # Escape sequence start
+                    read -rsn2 -t 1 escape
+                    case "$escape" in
+                        '[A') # Up arrow
+                            ((selected--)) || true
+                            [ $selected -lt 0 ] && selected=$((total - 1))
+                            ;;
+                        '[B') # Down arrow
+                            ((selected++)) || true
+                            [ $selected -ge $total ] && selected=0
+                            ;;
+                    esac
+                    ;;
+                '') # Enter
+                    tput cnorm
+                    tput ed
+                    worktree_path="${paths[$selected]}"
+                    name="${worktrees[$selected]}"
+                    break
+                    ;;
+                q|Q)
+                    tput cnorm
+                    tput ed
+                    exit 0
+                    ;;
+            esac
+        done
+    fi
+
+    echo -e "Opening ${GREEN}$name${NC}..."
+    if [ "$DANGEROUS_MODE" = true ]; then
+        cd "$worktree_path" && claude --dangerously-skip-permissions
+    else
+        cd "$worktree_path" && claude
+    fi
 }
 
 cmd_remove() {
@@ -204,6 +308,7 @@ cmd_help() {
     echo ""
     echo "Usage:"
     echo "  ccw create <name>   Create worktree and start Claude Code"
+    echo "  ccw open [name]     Open existing worktree (interactive if no name)"
     echo "  ccw list            List all worktrees for current repo"
     echo "  ccw remove <name>   Remove worktree (checks if merged first)"
     echo "  ccw cleanup         Remove all merged worktrees"
@@ -218,11 +323,13 @@ cmd_help() {
 # Main
 case "${1:-}" in
     create)  cmd_create "$2" ;;
+    open)    cmd_open "$2" ;;
     list)    cmd_list ;;
     remove)  cmd_remove "$2" ;;
     cleanup) cmd_cleanup ;;
     config)  cmd_config "$2" "$3" ;;
     help|-h|--help) cmd_help ;;
+    "")      cmd_open ;;
     *)
         cmd_help
         exit 1

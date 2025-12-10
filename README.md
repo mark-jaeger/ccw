@@ -23,10 +23,13 @@ curl -fsSL https://raw.githubusercontent.com/mark-jaeger/ccw/main/install.sh | b
 ## Usage
 
 ```bash
+ccw                 # Open worktree (interactive selector)
+ccw open [name]     # Open existing worktree
 ccw create <name>   # Create worktree + start Claude Code
 ccw list            # List worktrees for current repo
 ccw remove <name>   # Remove worktree (prompts if not merged)
 ccw cleanup         # Remove all merged worktrees
+ccw config          # View/set configuration
 ```
 
 ## Example
@@ -41,6 +44,12 @@ ccw create user-auth
 
 # In another terminal, start a different feature
 ccw create dark-mode
+
+# Re-open an existing worktree
+ccw open user-auth
+
+# Or use interactive selector (arrow keys to navigate)
+ccw
 
 # List all worktrees
 ccw list
@@ -58,7 +67,21 @@ ccw cleanup
 - Branches named `feature/<feature-name>`
 - Copies `.env` file if present
 - Runs `npm install` if `package.json` exists
-- Starts Claude Code with `--dangerously-skip-permissions`
+
+## Configuration
+
+Config file: `~/.config/ccw/config`
+
+```bash
+# View current config
+ccw config
+
+# Live dangerously (--dangerously-skip-permissions)
+ccw config DANGEROUS_MODE true
+
+# Live boringly
+ccw config DANGEROUS_MODE false
+```
 
 ## Why worktrees?
 
