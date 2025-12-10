@@ -240,6 +240,9 @@ cmd_cleanup() {
     for worktree_path in "$WORKTREE_BASE"/*/; do
         [ -d "$worktree_path" ] || continue
 
+        # Remove trailing slash for comparison
+        worktree_path="${worktree_path%/}"
+
         local name="$(basename "$worktree_path")"
         local branch_name="feature/$name"
 
