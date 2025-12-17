@@ -2,11 +2,14 @@
 # ccw - Claude Code Worktree manager
 #
 # Usage:
-#   ccw create <name>   Create worktree and start Claude Code
-#   ccw open [name]     Open existing worktree (interactive if no name)
-#   ccw list            List all worktrees for current repo
-#   ccw remove <name>   Remove worktree (checks if merged first)
-#   ccw cleanup         Remove all merged worktrees
+#   ccw create <name>      Create worktree (from staging) and start Claude Code
+#   ccw open [name]        Open existing worktree (interactive if no name)
+#   ccw list               List all worktrees for current repo
+#   ccw merge staging      Squash-merge current feature into staging
+#   ccw merge main         Merge staging into main (enforced)
+#   ccw sync               Pull latest staging into current branch
+#   ccw remove <name>      Remove worktree (checks if merged first)
+#   ccw cleanup            Remove all merged worktrees
 
 set -e
 
@@ -52,8 +55,12 @@ cmd_create() {
     if [ -d "$worktree_path" ]; then
         echo -e "${YELLOW}Worktree already exists${NC}"
     else
-        echo -e "Creating worktree ${GREEN}$name${NC}..."
-        git worktree add "$worktree_path" -b "$branch_name"
+        # Ensure staging is up to date
+        echo -e "Fetching latest ${GREEN}staging${NC}..."
+        git fetch origin staging:staging 2>/dev/null || true
+
+        echo -e "Creating worktree ${GREEN}$name${NC} from staging..."
+        git worktree add "$worktree_path" -b "$branch_name" staging
 
         # Copy .env if exists
         [ -f "$REPO_ROOT/.env" ] && cp "$REPO_ROOT/.env" "$worktree_path/.env"
@@ -65,7 +72,7 @@ cmd_create() {
         fi
 
         echo -e "${GREEN}✓${NC} Created: $worktree_path"
-        echo -e "${GREEN}✓${NC} Branch: $branch_name"
+        echo -e "${GREEN}✓${NC} Branch: $branch_name (from staging)"
     fi
 
     echo ""
@@ -277,6 +284,113 @@ cmd_cleanup() {
     echo -e "${GREEN}✓${NC} Removed $removed merged worktree(s)"
 }
 
+cmd_merge() {
+    local target="$1"
+
+    if [ -z "$target" ]; then
+        echo "Usage: ccw merge <staging|main>"
+        echo ""
+        echo "  ccw merge staging   Squash-merge current branch into staging"
+        echo "  ccw merge main      Merge staging into main (must be on staging)"
+        exit 1
+    fi
+
+    local current_branch
+    current_branch=$(git branch --show-current)
+
+    case "$target" in
+        staging)
+            if [ "$current_branch" = "staging" ]; then
+                echo -e "${RED}Error: Already on staging branch${NC}"
+                exit 1
+            fi
+
+            echo -e "Merging ${GREEN}$current_branch${NC} into ${GREEN}staging${NC}..."
+
+            # Fetch and checkout staging
+            git fetch origin staging:staging 2>/dev/null || true
+            git checkout staging
+
+            # Squash merge the feature branch
+            if git merge --squash "$current_branch"; then
+                # TODO(human): Craft the commit message
+                echo ""
+                echo -e "${GREEN}✓${NC} Changes staged. Ready to commit."
+                echo ""
+                echo "Review the changes, then commit with:"
+                echo -e "  ${YELLOW}git commit -m \"feat: your description\"${NC}"
+                echo ""
+                echo "After committing, push with:"
+                echo -e "  ${YELLOW}git push origin staging${NC}"
+            else
+                echo -e "${RED}Merge failed. Resolve conflicts and commit manually.${NC}"
+                exit 1
+            fi
+            ;;
+
+        main)
+            if [ "$current_branch" != "staging" ]; then
+                echo -e "${RED}Error: Must be on staging branch to merge into main${NC}"
+                echo ""
+                echo "First checkout staging:"
+                echo -e "  ${YELLOW}git checkout staging${NC}"
+                exit 1
+            fi
+
+            echo -e "Merging ${GREEN}staging${NC} into ${GREEN}main${NC}..."
+
+            # Fetch latest main
+            git fetch origin main:main 2>/dev/null || true
+            git checkout main
+
+            # Regular merge from staging
+            if git merge staging -m "Merge staging into main"; then
+                echo ""
+                echo -e "${GREEN}✓${NC} Merged staging into main"
+                echo ""
+                echo "Push to deploy:"
+                echo -e "  ${YELLOW}git push origin main${NC}"
+            else
+                echo -e "${RED}Merge failed. Resolve conflicts and commit manually.${NC}"
+                exit 1
+            fi
+            ;;
+
+        *)
+            echo -e "${RED}Unknown target: $target${NC}"
+            echo "Use 'staging' or 'main'"
+            exit 1
+            ;;
+    esac
+}
+
+cmd_sync() {
+    local current_branch
+    current_branch=$(git branch --show-current)
+
+    if [ "$current_branch" = "staging" ] || [ "$current_branch" = "main" ]; then
+        echo -e "${YELLOW}Warning: You're on $current_branch, not a feature branch${NC}"
+        read -p "Pull latest anyway? (y/N) " confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            exit 0
+        fi
+    fi
+
+    echo -e "Syncing ${GREEN}$current_branch${NC} with latest ${GREEN}staging${NC}..."
+
+    # Fetch latest staging
+    git fetch origin staging:staging 2>/dev/null || true
+
+    # Merge staging into current branch
+    if git merge staging -m "Sync with staging"; then
+        echo -e "${GREEN}✓${NC} Synced with staging"
+    else
+        echo -e "${RED}Merge conflicts detected.${NC}"
+        echo "Resolve conflicts, then run: git merge --continue"
+        exit 1
+    fi
+}
+
 cmd_config() {
     local key="$1"
     local value="$2"
@@ -322,17 +436,27 @@ cmd_help() {
     echo "ccw - Claude Code Worktree manager"
     echo ""
     echo "Usage:"
-    echo "  ccw create <name>   Create worktree and start Claude Code"
-    echo "  ccw open [name]     Open existing worktree (interactive if no name)"
-    echo "  ccw list            List all worktrees for current repo"
-    echo "  ccw remove <name>   Remove worktree (checks if merged first)"
-    echo "  ccw cleanup         Remove all merged worktrees"
-    echo "  ccw config [key] [value]  View or set configuration"
+    echo "  ccw create <name>      Create worktree (from staging) and start Claude Code"
+    echo "  ccw open [name]        Open existing worktree (interactive if no name)"
+    echo "  ccw list               List all worktrees for current repo"
+    echo "  ccw merge staging      Squash-merge current feature into staging"
+    echo "  ccw merge main         Merge staging into main (enforced)"
+    echo "  ccw sync               Pull latest staging into current branch"
+    echo "  ccw remove <name>      Remove worktree (checks if merged first)"
+    echo "  ccw cleanup            Remove all merged worktrees"
+    echo "  ccw config [key] [val] View or set configuration"
     echo ""
-    echo "Worktrees are created in: ~/worktrees/<repo-name>/<name>"
-    echo "Branches are named: feature/<name>"
+    echo "Workflow:"
+    echo "  1. ccw create my-feature    # Branch from staging"
+    echo "  2. (make changes)           # Work in worktree"
+    echo "  3. ccw merge staging        # Squash into staging"
+    echo "  4. (test on staging server)"
+    echo "  5. ccw merge main           # Ship to production"
+    echo "  6. ccw cleanup              # Remove merged worktrees"
     echo ""
-    echo "Config file: ~/.config/ccw/config"
+    echo "Worktrees: ~/worktrees/<repo-name>/<name>"
+    echo "Branches:  feature/<name>"
+    echo "Config:    ~/.config/ccw/config"
 }
 
 # Main
@@ -340,6 +464,8 @@ case "${1:-}" in
     create)  cmd_create "$2" ;;
     open)    cmd_open "$2" ;;
     list)    cmd_list ;;
+    merge)   cmd_merge "$2" ;;
+    sync)    cmd_sync ;;
     remove)  cmd_remove "$2" ;;
     cleanup) cmd_cleanup ;;
     config)  cmd_config "$2" "$3" ;;
