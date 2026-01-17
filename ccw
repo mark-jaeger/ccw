@@ -21,16 +21,6 @@ NC='\033[0m' # No Color
 
 # Config
 CONFIG_FILE="$HOME/.config/ccw/config"
-DANGEROUS_MODE=false
-
-load_config() {
-    if [ -f "$CONFIG_FILE" ]; then
-        # shellcheck source=/dev/null
-        source "$CONFIG_FILE"
-    fi
-}
-
-load_config
 
 # Get repo root and name
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -77,11 +67,7 @@ cmd_create() {
 
     echo ""
     echo "Starting Claude Code..."
-    if [ "$DANGEROUS_MODE" = true ]; then
-        cd "$worktree_path" && claude --dangerously-skip-permissions
-    else
-        cd "$worktree_path" && claude
-    fi
+    cd "$worktree_path" && claude
 }
 
 cmd_list() {
@@ -198,11 +184,7 @@ cmd_open() {
     fi
 
     echo -e "Opening ${GREEN}$name${NC}..."
-    if [ "$DANGEROUS_MODE" = true ]; then
-        cd "$worktree_path" && claude --dangerously-skip-permissions
-    else
-        cd "$worktree_path" && claude
-    fi
+    cd "$worktree_path" && claude
 }
 
 cmd_remove() {
@@ -404,8 +386,7 @@ cmd_config() {
             echo "  (no config file)"
         fi
         echo ""
-        echo "Available options:"
-        echo "  DANGEROUS_MODE=true    Launch Claude with --dangerously-skip-permissions"
+        echo "(No config options currently available)"
         return
     fi
 

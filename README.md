@@ -136,13 +136,9 @@ Config file: `~/.config/ccw/config`
 ```bash
 # View current config
 ccw config
-
-# Live dangerously (--dangerously-skip-permissions)
-ccw config DANGEROUS_MODE true
-
-# Live boringly
-ccw config DANGEROUS_MODE false
 ```
+
+(No config options currently available)
 
 ## Prerequisites
 
